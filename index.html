@@ -85,6 +85,10 @@
   .actions { display: flex; gap: .5rem; margin-top: .8rem; }
   .hidden { display: none; }
 
+  /* Shared horses */
+  .shared-draw { background: #1a1a1a; border: 1px dashed #444; border-radius: 8px; padding: .8rem 1rem; }
+  .shared-draw-name { font-weight: 700; font-size: .9rem; margin-bottom: .4rem; color: #888; }
+
   /* View tabs */
   .view-tabs { display: flex; gap: .5rem; margin-bottom: 1rem; }
   .view-tab { padding: .5rem 1.2rem; border-radius: 8px; cursor: pointer; font-size: .85rem; font-weight: 600; background: transparent; border: 1px solid #333; color: #999; transition: all .2s; }
@@ -407,6 +411,30 @@ function buildDrawContent(body, idx, drawn, result, race) {
     pDiv.appendChild(tags);
     grid.appendChild(pDiv);
   });
+
+  // Shared horses
+  const shared = drawn['_shared'] || [];
+  if (shared.length > 0) {
+    const sDiv = document.createElement('div');
+    sDiv.className = 'shared-draw';
+    const sName = document.createElement('div');
+    sName.className = 'shared-draw-name';
+    sName.textContent = 'Shared (' + shared.length + ') \u2014 winnings split equally';
+    sDiv.appendChild(sName);
+    const sTags = document.createElement('div');
+    sTags.className = 'horse-tags';
+    shared.forEach(h => {
+      const tag = document.createElement('span');
+      tag.className = 'horse-tag';
+      if (result && result.first === h) tag.classList.add('winner');
+      else if (result && result.second === h) tag.classList.add('placed');
+      tag.textContent = h;
+      sTags.appendChild(tag);
+    });
+    sDiv.appendChild(sTags);
+    grid.appendChild(sDiv);
+  }
+
   body.appendChild(grid);
 
   if (!result) {
@@ -462,34 +490,21 @@ function buildDrawContent(body, idx, drawn, result, race) {
     const p1 = (pot * 0.7).toFixed(2);
     const p2 = (pot * 0.3).toFixed(2);
 
-    const b = document.createElement('span');
+    function bannerWinText(owner, prize) {
+      if (owner === '_shared') return 'split \u00A3' + prize + ' between all';
+      if (owner) return owner + ' wins \u00A3' + prize;
+      return 'no one had it!';
+    }
+
     const line1 = document.createElement('strong');
     line1.textContent = '1st: ';
     banner.appendChild(line1);
-    banner.appendChild(document.createTextNode(result.first));
-    if (w1) {
-      banner.appendChild(document.createTextNode(' \u2014 '));
-      const s1 = document.createElement('strong');
-      s1.textContent = w1;
-      banner.appendChild(s1);
-      banner.appendChild(document.createTextNode(' wins \u00A3' + p1));
-    } else {
-      banner.appendChild(document.createTextNode(' \u2014 no one had it!'));
-    }
+    banner.appendChild(document.createTextNode(result.first + ' \u2014 ' + bannerWinText(w1, p1)));
     banner.appendChild(document.createTextNode('   |   '));
     const line2 = document.createElement('strong');
     line2.textContent = '2nd: ';
     banner.appendChild(line2);
-    banner.appendChild(document.createTextNode(result.second));
-    if (w2) {
-      banner.appendChild(document.createTextNode(' \u2014 '));
-      const s2 = document.createElement('strong');
-      s2.textContent = w2;
-      banner.appendChild(s2);
-      banner.appendChild(document.createTextNode(' wins \u00A3' + p2));
-    } else {
-      banner.appendChild(document.createTextNode(' \u2014 no one had it!'));
-    }
+    banner.appendChild(document.createTextNode(result.second + ' \u2014 ' + bannerWinText(w2, p2)));
     body.appendChild(banner);
   }
 }
@@ -501,11 +516,22 @@ function toggleRace(idx) {
 function drawRace(idx) {
   const race = RACE_DATA[state.currentDay][idx];
   const shuffled = shuffle(race.runners);
+  const perPlayer = Math.floor(shuffled.length / state.players.length);
   const draw = {};
   state.players.forEach(p => draw[p] = []);
-  shuffled.forEach((horse, i) => {
-    draw[state.players[i % state.players.length]].push(horse);
-  });
+  draw['_shared'] = [];
+
+  let i = 0;
+  for (const p of state.players) {
+    for (let j = 0; j < perPlayer; j++) {
+      draw[p].push(shuffled[i++]);
+    }
+  }
+  // Leftover horses go to shared pool
+  while (i < shuffled.length) {
+    draw['_shared'].push(shuffled[i++]);
+  }
+
   state.draws[state.currentDay][idx] = draw;
   save();
   renderRaces();
@@ -541,17 +567,26 @@ function confirmResult(raceIdx) {
 
   state.results[state.currentDay][raceIdx] = { first: pending.first, second: pending.second };
   const pot = state.players.length * state.stake;
-  const w1 = findPlayerWithHorse(raceIdx, pending.first);
-  const w2 = findPlayerWithHorse(raceIdx, pending.second);
-  if (w1) state.scores[w1] = (state.scores[w1] || 0) + pot * 0.7;
-  if (w2) state.scores[w2] = (state.scores[w2] || 0) + pot * 0.3;
+  awardPrize(raceIdx, pending.first, pot * 0.7);
+  awardPrize(raceIdx, pending.second, pot * 0.3);
 
   delete pendingResults[raceIdx];
   save();
   renderScoreboard();
   renderRaces();
   document.getElementById('race-body-' + raceIdx).classList.add('open');
-  if (w1) fireConfetti();
+  if (findPlayerWithHorse(raceIdx, pending.first)) fireConfetti();
+}
+
+function awardPrize(raceIdx, horse, amount) {
+  const owner = findPlayerWithHorse(raceIdx, horse);
+  if (owner === '_shared') {
+    // Split equally between all players
+    const share = amount / state.players.length;
+    state.players.forEach(p => { state.scores[p] = (state.scores[p] || 0) + share; });
+  } else if (owner) {
+    state.scores[owner] = (state.scores[owner] || 0) + amount;
+  }
 }
 
 function findPlayerWithHorse(raceIdx, horse) {
@@ -560,7 +595,18 @@ function findPlayerWithHorse(raceIdx, horse) {
   for (const player of state.players) {
     if (draw[player] && draw[player].includes(horse)) return player;
   }
+  if (draw['_shared'] && draw['_shared'].includes(horse)) return '_shared';
   return null;
+}
+
+function reversePrize(raceIdx, horse, amount) {
+  const owner = findPlayerWithHorse(raceIdx, horse);
+  if (owner === '_shared') {
+    const share = amount / state.players.length;
+    state.players.forEach(p => { state.scores[p] -= share; });
+  } else if (owner) {
+    state.scores[owner] -= amount;
+  }
 }
 
 function resetDay() {
@@ -569,10 +615,8 @@ function resetDay() {
   for (const raceIdx in dayResults) {
     const res = dayResults[raceIdx];
     const pot = state.players.length * state.stake;
-    const w1 = findPlayerWithHorse(parseInt(raceIdx), res.first);
-    const w2 = findPlayerWithHorse(parseInt(raceIdx), res.second);
-    if (w1) state.scores[w1] -= pot * 0.7;
-    if (w2) state.scores[w2] -= pot * 0.3;
+    reversePrize(parseInt(raceIdx), res.first, pot * 0.7);
+    reversePrize(parseInt(raceIdx), res.second, pot * 0.3);
   }
   state.draws[state.currentDay] = {};
   state.results[state.currentDay] = {};
@@ -863,10 +907,8 @@ async function fetchResults() {
       if (first && second && first !== second) {
         state.results[state.currentDay][raceIdx] = { first, second };
         const pot = state.players.length * state.stake;
-        const w1 = findPlayerWithHorse(raceIdx, first);
-        const w2 = findPlayerWithHorse(raceIdx, second);
-        if (w1) state.scores[w1] = (state.scores[w1] || 0) + pot * 0.7;
-        if (w2) state.scores[w2] = (state.scores[w2] || 0) + pot * 0.3;
+        awardPrize(raceIdx, first, pot * 0.7);
+        awardPrize(raceIdx, second, pot * 0.3);
         applied++;
       }
     });
