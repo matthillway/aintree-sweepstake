@@ -159,9 +159,11 @@
   </div>
 
   <div id="app" class="hidden">
-    <div style="text-align:right;margin-bottom:.5rem;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem;">
+      <button class="btn btn-primary btn-small" onclick="shareState()" style="font-size:.75rem;padding:.3rem .8rem;">Share Link</button>
       <button class="btn btn-secondary btn-small" onclick="newSweepstake()" style="font-size:.75rem;padding:.3rem .8rem;">New Sweepstake</button>
     </div>
+    <div id="shareNotice" class="hidden" style="background:#1a3a1a;border:1px solid #27ae60;border-radius:8px;padding:.6rem 1rem;margin-bottom:.8rem;font-size:.85rem;color:#27ae60;text-align:center;"></div>
     <div class="scoreboard" id="scoreboard"></div>
     <div class="day-tabs">
       <div class="day-tab active" onclick="switchDay('thursday')" id="tab-thursday">Thu 9 Apr &mdash; Day 1</div>
@@ -946,6 +948,46 @@ function fuzzyMatchHorse(apiName, runners) {
   return null;
 }
 
+// ── Share / Load state via URL ──
+function shareState() {
+  const json = JSON.stringify(state);
+  const encoded = btoa(unescape(encodeURIComponent(json)));
+  const url = window.location.origin + window.location.pathname + '#' + encoded;
+
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(url).then(() => {
+      showShareNotice('Link copied! Send it to the others.');
+    }).catch(() => {
+      showShareNotice(url);
+    });
+  } else {
+    showShareNotice(url);
+  }
+}
+
+function showShareNotice(msg) {
+  const el = document.getElementById('shareNotice');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  setTimeout(() => el.classList.add('hidden'), 8000);
+}
+
+function loadFromHash() {
+  const hash = window.location.hash.slice(1);
+  if (!hash) return false;
+  try {
+    const json = decodeURIComponent(escape(atob(hash)));
+    const loaded = JSON.parse(json);
+    if (loaded.players && loaded.players.length > 0) {
+      state = loaded;
+      save(); // Save to localStorage so it persists after they clear the hash
+      window.history.replaceState(null, '', window.location.pathname); // Clean URL
+      return true;
+    }
+  } catch (e) { /* invalid hash, ignore */ }
+  return false;
+}
+
 // ── New Sweepstake (reset everything) ──
 function newSweepstake() {
   if (!confirm('Start a new sweepstake? This will clear all players, draws and results.')) return;
@@ -958,8 +1000,8 @@ function newSweepstake() {
   document.getElementById('stakeInput').value = '2';
 }
 
-// Init
-if (load() && state.players.length > 0) {
+// Init — check URL hash first (shared link), then localStorage
+if (loadFromHash() || (load() && state.players.length > 0)) {
   showApp();
   document.querySelectorAll('.day-tab').forEach(t => t.classList.remove('active'));
   document.getElementById('tab-' + state.currentDay).classList.add('active');
