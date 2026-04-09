@@ -155,6 +155,9 @@
   </div>
 
   <div id="app" class="hidden">
+    <div style="text-align:right;margin-bottom:.5rem;">
+      <button class="btn btn-secondary btn-small" onclick="newSweepstake()" style="font-size:.75rem;padding:.3rem .8rem;">New Sweepstake</button>
+    </div>
     <div class="scoreboard" id="scoreboard"></div>
     <div class="day-tabs">
       <div class="day-tab active" onclick="switchDay('thursday')" id="tab-thursday">Thu 9 Apr &mdash; Day 1</div>
@@ -899,6 +902,18 @@ function fuzzyMatchHorse(apiName, runners) {
     if (rc.includes(clean) || clean.includes(rc)) return r;
   }
   return null;
+}
+
+// ── New Sweepstake (reset everything) ──
+function newSweepstake() {
+  if (!confirm('Start a new sweepstake? This will clear all players, draws and results.')) return;
+  localStorage.removeItem('aintree2026');
+  state = { players: [], stake: 2, currentDay: 'thursday', draws: { thursday: {}, friday: {} }, results: { thursday: {}, friday: {} }, scores: {} };
+  pendingResults = {};
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('setup').classList.remove('hidden');
+  document.querySelectorAll('#playerInputs input').forEach(inp => { inp.value = ''; });
+  document.getElementById('stakeInput').value = '2';
 }
 
 // Init
