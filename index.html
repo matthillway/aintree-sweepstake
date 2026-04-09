@@ -85,6 +85,39 @@
   .actions { display: flex; gap: .5rem; margin-top: .8rem; }
   .hidden { display: none; }
 
+  /* View tabs */
+  .view-tabs { display: flex; gap: .5rem; margin-bottom: 1rem; }
+  .view-tab { padding: .5rem 1.2rem; border-radius: 8px; cursor: pointer; font-size: .85rem; font-weight: 600; background: transparent; border: 1px solid #333; color: #999; transition: all .2s; }
+  .view-tab.active { background: #fff; color: #000; border-color: #fff; }
+  .view-tab:hover { border-color: #fff; color: #fff; }
+
+  /* All Horses view */
+  .horses-overview { margin-bottom: 1.5rem; }
+  .player-portfolio { background: #000; border: 1px solid #333; border-radius: 12px; padding: 1.2rem; margin-bottom: 1rem; }
+  .player-portfolio h3 { font-family: 'Tenor Sans', serif; font-weight: 400; font-size: 1.2rem; margin-bottom: .8rem; }
+  .portfolio-race { margin-bottom: .6rem; }
+  .portfolio-race-name { font-size: .75rem; color: #666; margin-bottom: .25rem; }
+  .portfolio-horses { display: flex; flex-wrap: wrap; gap: .25rem; }
+
+  /* Settlement */
+  .settlement { background: #000; border: 1px solid #333; border-radius: 12px; padding: 1.5rem; margin-top: 1.5rem; }
+  .settlement h3 { font-family: 'Tenor Sans', serif; font-weight: 400; font-size: 1.3rem; margin-bottom: 1rem; }
+  .settlement-row { display: flex; justify-content: space-between; align-items: center; padding: .6rem 0; border-bottom: 1px solid #1a1a1a; }
+  .settlement-row:last-child { border-bottom: none; }
+  .settlement-name { font-weight: 600; }
+  .settlement-amount { font-size: 1.1rem; font-weight: 700; }
+  .settlement-positive { color: #27ae60; }
+  .settlement-negative { color: #c62828; }
+  .settlement-zero { color: #666; }
+  .settlement-transfers { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #333; }
+  .transfer-row { padding: .4rem 0; font-size: .9rem; color: #ccc; }
+  .transfer-arrow { color: #666; margin: 0 .5rem; }
+
+  /* Fetch button */
+  .fetch-btn { position: relative; }
+  .fetch-btn.loading::after { content: ''; display: inline-block; width: 14px; height: 14px; border: 2px solid #fff; border-top-color: transparent; border-radius: 50%; animation: spin .6s linear infinite; margin-left: .5rem; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
   .confetti-piece { position: fixed; width: 10px; height: 10px; top: -10px; z-index: 999; pointer-events: none; }
 
   @media (max-width: 600px) {
@@ -127,10 +160,28 @@
       <div class="day-tab active" onclick="switchDay('thursday')" id="tab-thursday">Thu 9 Apr &mdash; Day 1</div>
       <div class="day-tab" onclick="switchDay('friday')" id="tab-friday">Fri 10 Apr &mdash; Ladies Day</div>
     </div>
-    <div id="racesContainer"></div>
-    <div style="text-align:center; margin: 1.5rem 0;">
-      <button class="btn btn-primary" onclick="drawAllRaces()">Draw All Races</button>
-      <button class="btn btn-secondary" onclick="resetDay()" style="margin-left:.5rem;">Reset Day</button>
+
+    <div class="view-tabs">
+      <div class="view-tab active" onclick="switchView('races')" id="view-races">Races</div>
+      <div class="view-tab" onclick="switchView('horses')" id="view-horses">All Horses</div>
+      <div class="view-tab" onclick="switchView('settlement')" id="view-settlement">Settlement</div>
+    </div>
+
+    <div id="racesView">
+      <div id="racesContainer"></div>
+      <div style="text-align:center; margin: 1.5rem 0; display:flex; justify-content:center; gap:.5rem; flex-wrap:wrap;">
+        <button class="btn btn-primary" onclick="drawAllRaces()">Draw All Races</button>
+        <button class="btn btn-primary fetch-btn" id="fetchBtn" onclick="fetchResults()">Fetch Results</button>
+        <button class="btn btn-secondary" onclick="resetDay()">Reset Day</button>
+      </div>
+    </div>
+
+    <div id="horsesView" class="hidden">
+      <div id="horsesContainer" class="horses-overview"></div>
+    </div>
+
+    <div id="settlementView" class="hidden">
+      <div id="settlementContainer"></div>
     </div>
   </div>
 </div>
@@ -545,6 +596,309 @@ function fireConfetti() {
       { transform: 'translateY(' + (window.innerHeight + 50) + 'px) rotate(' + (Math.random()*720-360) + 'deg)', opacity: 0 }
     ], { duration: dur * 1000, easing: 'cubic-bezier(.2,.8,.4,1)' }).onfinish = () => el.remove();
   }
+}
+
+// ── View switching ──
+let currentView = 'races';
+
+function switchView(view) {
+  currentView = view;
+  document.querySelectorAll('.view-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('view-' + view).classList.add('active');
+  document.getElementById('racesView').classList.toggle('hidden', view !== 'races');
+  document.getElementById('horsesView').classList.toggle('hidden', view !== 'horses');
+  document.getElementById('settlementView').classList.toggle('hidden', view !== 'settlement');
+  if (view === 'horses') renderHorsesOverview();
+  if (view === 'settlement') renderSettlement();
+}
+
+// ── All Horses view ──
+function renderHorsesOverview() {
+  const container = document.getElementById('horsesContainer');
+  container.replaceChildren();
+
+  const days = [
+    { key: 'thursday', label: 'Thursday 9 Apr' },
+    { key: 'friday', label: 'Friday 10 Apr' }
+  ];
+
+  for (const player of state.players) {
+    const card = document.createElement('div');
+    card.className = 'player-portfolio';
+
+    const h3 = document.createElement('h3');
+    h3.style.color = PLAYER_COLORS[state.players.indexOf(player) % PLAYER_COLORS.length];
+    h3.textContent = player;
+    card.appendChild(h3);
+
+    let totalHorses = 0;
+
+    for (const day of days) {
+      const dayDraws = state.draws[day.key];
+      const dayResults = state.results[day.key];
+      const races = RACE_DATA[day.key];
+      if (!dayDraws || Object.keys(dayDraws).length === 0) continue;
+
+      const dayLabel = document.createElement('div');
+      dayLabel.style.cssText = 'font-size:.7rem;color:#666;text-transform:uppercase;letter-spacing:1px;margin-top:.6rem;margin-bottom:.4rem;';
+      dayLabel.textContent = day.label;
+      card.appendChild(dayLabel);
+
+      races.forEach((race, idx) => {
+        const draw = dayDraws[idx];
+        if (!draw || !draw[player] || draw[player].length === 0) return;
+
+        const raceDiv = document.createElement('div');
+        raceDiv.className = 'portfolio-race';
+
+        const raceName = document.createElement('div');
+        raceName.className = 'portfolio-race-name';
+        raceName.textContent = race.time + ' ' + race.name;
+        raceDiv.appendChild(raceName);
+
+        const horses = document.createElement('div');
+        horses.className = 'portfolio-horses';
+        const result = dayResults[idx];
+        draw[player].forEach(h => {
+          const tag = document.createElement('span');
+          tag.className = 'horse-tag';
+          if (result && result.first === h) tag.classList.add('winner');
+          else if (result && result.second === h) tag.classList.add('placed');
+          tag.textContent = h;
+          horses.appendChild(tag);
+          totalHorses++;
+        });
+        raceDiv.appendChild(horses);
+        card.appendChild(raceDiv);
+      });
+    }
+
+    const summary = document.createElement('div');
+    summary.style.cssText = 'margin-top:.8rem;padding-top:.6rem;border-top:1px solid #333;font-size:.85rem;color:#999;';
+    summary.textContent = totalHorses + ' horses total';
+    card.appendChild(summary);
+
+    container.appendChild(card);
+  }
+
+  if (container.children.length === 0) {
+    const msg = document.createElement('p');
+    msg.style.cssText = 'color:#666;text-align:center;padding:2rem;';
+    msg.textContent = 'No draws yet. Go to Races and draw first.';
+    container.appendChild(msg);
+  }
+}
+
+// ── Settlement view ──
+function renderSettlement() {
+  const container = document.getElementById('settlementContainer');
+  container.replaceChildren();
+
+  const card = document.createElement('div');
+  card.className = 'settlement';
+
+  const h3 = document.createElement('h3');
+  h3.textContent = 'Settlement';
+  card.appendChild(h3);
+
+  // Calculate net position per player
+  const totalRacesWithDraws = countDrawnRaces();
+  const stakePerRace = state.stake;
+  const net = {};
+  state.players.forEach(p => {
+    const totalStaked = totalRacesWithDraws * stakePerRace;
+    const totalWon = state.scores[p] || 0;
+    net[p] = totalWon - totalStaked;
+  });
+
+  // Show each player's position
+  const sorted = [...state.players].sort((a, b) => net[b] - net[a]);
+  sorted.forEach(p => {
+    const row = document.createElement('div');
+    row.className = 'settlement-row';
+
+    const name = document.createElement('span');
+    name.className = 'settlement-name';
+    name.textContent = p;
+    row.appendChild(name);
+
+    const details = document.createElement('div');
+    details.style.textAlign = 'right';
+
+    const won = document.createElement('div');
+    won.className = 'settlement-amount';
+    const n = net[p];
+    if (n > 0) { won.classList.add('settlement-positive'); won.textContent = '+\u00A3' + n.toFixed(2); }
+    else if (n < 0) { won.classList.add('settlement-negative'); won.textContent = '-\u00A3' + Math.abs(n).toFixed(2); }
+    else { won.classList.add('settlement-zero'); won.textContent = '\u00A30.00'; }
+    details.appendChild(won);
+
+    const breakdown = document.createElement('div');
+    breakdown.style.cssText = 'font-size:.75rem;color:#666;';
+    breakdown.textContent = 'Won \u00A3' + (state.scores[p] || 0).toFixed(2) + ' / Staked \u00A3' + (totalRacesWithDraws * stakePerRace).toFixed(2);
+    details.appendChild(breakdown);
+
+    row.appendChild(details);
+    card.appendChild(row);
+  });
+
+  // Calculate transfers (who pays who)
+  const transfers = calculateTransfers(net);
+  if (transfers.length > 0) {
+    const section = document.createElement('div');
+    section.className = 'settlement-transfers';
+
+    const th = document.createElement('h4');
+    th.style.cssText = 'font-size:.85rem;color:#999;margin-bottom:.5rem;';
+    th.textContent = 'To settle up:';
+    section.appendChild(th);
+
+    transfers.forEach(t => {
+      const row = document.createElement('div');
+      row.className = 'transfer-row';
+      const from = document.createElement('strong');
+      from.textContent = t.from;
+      from.style.color = PLAYER_COLORS[state.players.indexOf(t.from) % PLAYER_COLORS.length];
+      const arrow = document.createElement('span');
+      arrow.className = 'transfer-arrow';
+      arrow.textContent = ' pays ';
+      const to = document.createElement('strong');
+      to.textContent = t.to;
+      to.style.color = PLAYER_COLORS[state.players.indexOf(t.to) % PLAYER_COLORS.length];
+      const amount = document.createElement('span');
+      amount.textContent = ' \u00A3' + t.amount.toFixed(2);
+      amount.style.color = '#fff';
+      row.appendChild(from);
+      row.appendChild(arrow);
+      row.appendChild(to);
+      row.appendChild(amount);
+      section.appendChild(row);
+    });
+    card.appendChild(section);
+  }
+
+  // Races remaining
+  const totalRaces = RACE_DATA.thursday.length + RACE_DATA.friday.length;
+  const resultsIn = Object.keys(state.results.thursday).length + Object.keys(state.results.friday).length;
+
+  const footer = document.createElement('div');
+  footer.style.cssText = 'margin-top:1rem;padding-top:.8rem;border-top:1px solid #333;font-size:.8rem;color:#666;text-align:center;';
+  footer.textContent = resultsIn + ' of ' + totalRaces + ' races completed';
+  card.appendChild(footer);
+
+  container.appendChild(card);
+}
+
+function countDrawnRaces() {
+  let count = 0;
+  for (const day of ['thursday', 'friday']) {
+    count += Object.keys(state.draws[day] || {}).length;
+  }
+  return count;
+}
+
+function calculateTransfers(net) {
+  // Greedy settlement: people who owe pay people who are owed
+  const debtors = [];
+  const creditors = [];
+  for (const p in net) {
+    if (net[p] < -0.01) debtors.push({ name: p, amount: -net[p] });
+    else if (net[p] > 0.01) creditors.push({ name: p, amount: net[p] });
+  }
+  debtors.sort((a, b) => b.amount - a.amount);
+  creditors.sort((a, b) => b.amount - a.amount);
+
+  const transfers = [];
+  let di = 0, ci = 0;
+  while (di < debtors.length && ci < creditors.length) {
+    const amt = Math.min(debtors[di].amount, creditors[ci].amount);
+    if (amt > 0.01) {
+      transfers.push({ from: debtors[di].name, to: creditors[ci].name, amount: amt });
+    }
+    debtors[di].amount -= amt;
+    creditors[ci].amount -= amt;
+    if (debtors[di].amount < 0.01) di++;
+    if (creditors[ci].amount < 0.01) ci++;
+  }
+  return transfers;
+}
+
+// ── Fetch results from API ──
+async function fetchResults() {
+  const btn = document.getElementById('fetchBtn');
+  btn.classList.add('loading');
+  btn.disabled = true;
+
+  const dateMap = { thursday: '2026-04-09', friday: '2026-04-10' };
+  const date = dateMap[state.currentDay];
+
+  try {
+    const resp = await fetch('/api/results?date=' + date);
+    if (!resp.ok) throw new Error('API returned ' + resp.status);
+    const data = await resp.json();
+
+    if (!data.results || data.results.length === 0) {
+      alert('No results available yet. Races may not have finished.');
+      return;
+    }
+
+    const races = RACE_DATA[state.currentDay];
+    const dayDraws = state.draws[state.currentDay];
+    let applied = 0;
+
+    data.results.forEach(r => {
+      // Match result to race by time
+      const raceIdx = races.findIndex(race => race.time === r.time);
+      if (raceIdx === -1) return;
+      if (state.results[state.currentDay][raceIdx]) return; // already have result
+      if (!dayDraws[raceIdx]) return; // not drawn
+
+      // Fuzzy match horse names (API might have slight differences)
+      const first = fuzzyMatchHorse(r.first, races[raceIdx].runners);
+      const second = r.second ? fuzzyMatchHorse(r.second, races[raceIdx].runners) : null;
+
+      if (first && second && first !== second) {
+        state.results[state.currentDay][raceIdx] = { first, second };
+        const pot = state.players.length * state.stake;
+        const w1 = findPlayerWithHorse(raceIdx, first);
+        const w2 = findPlayerWithHorse(raceIdx, second);
+        if (w1) state.scores[w1] = (state.scores[w1] || 0) + pot * 0.7;
+        if (w2) state.scores[w2] = (state.scores[w2] || 0) + pot * 0.3;
+        applied++;
+      }
+    });
+
+    save();
+    renderScoreboard();
+    renderRaces();
+
+    if (applied > 0) {
+      alert(applied + ' new result' + (applied > 1 ? 's' : '') + ' applied!');
+      fireConfetti();
+    } else {
+      alert('No new results to apply. Check back after the next race.');
+    }
+  } catch (err) {
+    alert('Could not fetch results: ' + err.message + '\nYou can still enter results manually by clicking a race.');
+  } finally {
+    btn.classList.remove('loading');
+    btn.disabled = false;
+  }
+}
+
+function fuzzyMatchHorse(apiName, runners) {
+  if (!apiName) return null;
+  const clean = apiName.toLowerCase().replace(/[^a-z]/g, '');
+  // Exact match first
+  for (const r of runners) {
+    if (r.toLowerCase().replace(/[^a-z]/g, '') === clean) return r;
+  }
+  // Partial match (API name contains runner or vice versa)
+  for (const r of runners) {
+    const rc = r.toLowerCase().replace(/[^a-z]/g, '');
+    if (rc.includes(clean) || clean.includes(rc)) return r;
+  }
+  return null;
 }
 
 // Init
