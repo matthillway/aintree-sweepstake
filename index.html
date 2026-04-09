@@ -948,6 +948,64 @@ function fuzzyMatchHorse(apiName, runners) {
   return null;
 }
 
+// ── Supabase sync ──
+const SUPABASE_URL = 'https://bdbogngvcjwzurhhkpfl.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJkYm9nbmd2Y2p3enVyaGhrcGZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5NzM2ODUsImV4cCI6MjA4ODU0OTY4NX0.P4Q5tKtwLJ2_5e-_924EfQELf4BraG4uwV7d5bvk8RQ';
+
+async function syncToServer() {
+  try {
+    await fetch(SUPABASE_URL + '/rest/v1/sweepstake_state?id=eq.current', {
+      method: 'DELETE',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+    });
+    await fetch(SUPABASE_URL + '/rest/v1/sweepstake_state', {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({ id: 'current', state: state, updated_at: new Date().toISOString() })
+    });
+  } catch (e) { /* silent fail — localStorage still works as fallback */ }
+}
+
+async function syncFromServer() {
+  try {
+    const resp = await fetch(SUPABASE_URL + '/rest/v1/sweepstake_state?id=eq.current&select=state,updated_at', {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+    });
+    const rows = await resp.json();
+    if (rows.length > 0 && rows[0].state && rows[0].state.players && rows[0].state.players.length > 0) {
+      const remote = rows[0].state;
+      // Only update if remote is newer (has more results or different data)
+      const remoteJson = JSON.stringify(remote);
+      const localJson = JSON.stringify(state);
+      if (remoteJson !== localJson) {
+        state = remote;
+        save();
+        renderScoreboard();
+        renderRaces();
+        if (currentView === 'horses') renderHorsesOverview();
+        if (currentView === 'settlement') renderSettlement();
+      }
+      return true;
+    }
+  } catch (e) { /* silent fail */ }
+  return false;
+}
+
+// Override save to also push to server
+const _origSave = save;
+function save() {
+  localStorage.setItem('aintree2026', JSON.stringify(state));
+  syncToServer();
+}
+
+// Poll for updates every 15 seconds
+setInterval(syncFromServer, 15000);
+
 // ── Share / Load state via URL ──
 function shareState() {
   const json = JSON.stringify(state);
@@ -1000,12 +1058,25 @@ function newSweepstake() {
   document.getElementById('stakeInput').value = '2';
 }
 
-// Init — check URL hash first (shared link), then localStorage
-if (loadFromHash() || (load() && state.players.length > 0)) {
-  showApp();
+// Init — check URL hash first, then localStorage, then server
+async function init() {
+  if (loadFromHash()) {
+    showApp();
+  } else if (load() && state.players.length > 0) {
+    showApp();
+    // Also try to get latest from server
+    await syncFromServer();
+  } else {
+    // No local state — try loading from server
+    const loaded = await syncFromServer();
+    if (loaded && state.players && state.players.length > 0) {
+      showApp();
+    }
+  }
   document.querySelectorAll('.day-tab').forEach(t => t.classList.remove('active'));
-  document.getElementById('tab-' + state.currentDay).classList.add('active');
+  document.getElementById('tab-' + (state.currentDay || 'thursday')).classList.add('active');
 }
+init();
 </script>
 </body>
 </html>
