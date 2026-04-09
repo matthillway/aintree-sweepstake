@@ -1058,14 +1058,13 @@ function newSweepstake() {
 async function init() {
   if (loadFromHash()) {
     showApp();
-  } else if (load() && state.players.length > 0) {
-    showApp();
-    // Also try to get latest from server
-    await syncFromServer();
   } else {
-    // No local state — try loading from server
-    const loaded = await syncFromServer();
-    if (loaded && state.players && state.players.length > 0) {
+    // Always try server first — it has the latest state
+    const serverLoaded = await syncFromServer();
+    if (serverLoaded && state.players && state.players.length > 0) {
+      showApp();
+    } else if (load() && state.players.length > 0) {
+      // Fallback to localStorage if server unavailable
       showApp();
     }
   }
